@@ -78,6 +78,13 @@ function registerTools(server) {
     {},
     () => tools.listDependencies(),
   );
+  add(
+    "port_drift",
+    "Port drift",
+    "Every container, stopped ones too: which ports are open to the LAN or only on the Docker bridge, and where a running container differs from its unRAID template. Port numbers only, never values.",
+    {},
+    () => tools.portDrift(),
+  );
   add("list_shares", "List shares", "User shares: size, free and used space, cache setting, included and excluded disks.", {}, () => tools.listShares());
   add(
     "list_disks",

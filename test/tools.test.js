@@ -21,12 +21,35 @@ fs.writeFileSync(
   </Container>`,
 );
 
+// A file name in another case than the container (as CA creates them), and -p bindings in Extra Parameters.
+fs.writeFileSync(
+  path.join(ROOT, "my-Closed-App.xml"),
+  `<?xml version="1.0"?><Container><Name>closed-app</Name><Network>bridge</Network><ExtraParams>--restart=always -e HIDDEN=${FAKE} -p 172.17.0.1:9001:80 -p 7000-7001:7000-7001</ExtraParams>
+  <Config Name="Sync" Target="55555" Type="Port" Mode="tcp">9002</Config></Container>`,
+);
+fs.writeFileSync(
+  path.join(ROOT, "my-stopped.xml"),
+  `<?xml version="1.0"?><Container><Name>stopped</Name><Network>bridge</Network><ExtraParams></ExtraParams><Config Name="Web" Target="80" Type="Port" Mode="tcp">9100</Config></Container>`,
+);
+
 const CONTAINER = {
   id: "abc:def", names: ["/app"], image: "img:1", state: "RUNNING", status: "Up", created: 1, autoStart: true, isUpdateAvailable: false, isOrphaned: false,
   ports: [{ ip: "0.0.0.0", privatePort: 80, publicPort: 8080, type: "TCP" }], hostConfig: { networkMode: "bridge" },
   mounts: [{ Destination: "/data", Source: "/mnt/x", RW: true, Type: "bind", Propagation: "rprivate" }],
   // Fields no query may ask for: a request for them makes the fake fail the test.
 };
+
+const base = { state: "RUNNING", status: "Up", created: 1, autoStart: true, isUpdateAvailable: false, isOrphaned: false, hostConfig: { networkMode: "bridge" }, mounts: [] };
+const CLOSED = {
+  ...base, id: "c2", names: ["/closed-app"], image: "i",
+  ports: [
+    { ip: "0.0.0.0", privatePort: 80, publicPort: 9001, type: "TCP" }, // came back on the LAN
+    { ip: "0.0.0.0", privatePort: 55555, publicPort: 9002, type: "TCP" },
+    { ip: "", privatePort: 443, publicPort: null, type: "TCP" },
+  ],
+};
+const STOPPED = { ...base, id: "c3", names: ["/stopped"], image: "i", state: "EXITED", status: "Exited", ports: [] };
+const QUIET = { ...base, id: "c4", names: ["/quiet"], image: "i", ports: [] };
 
 const api = http.createServer((req, res) => {
   let b = "";
@@ -36,8 +59,9 @@ const api = http.createServer((req, res) => {
     queries.push(q);
     assert.strictEqual(req.headers["x-api-key"], "test-key");
     let data = {};
-    if (q.includes("logs(")) data = { docker: { logs: { lines: [{ timestamp: "t", message: `start password=${FAKE} ok` }, { timestamp: "t", message: "plain line" }] } } };
-    else if (q.includes("containers")) data = { docker: { containers: [CONTAINER] } };
+    if (q.includes('"c4"')) data = { docker: { logs: { lines: [] } } };
+    else if (q.includes("logs(")) data = { docker: { logs: { lines: [{ timestamp: "t3", message: "newest" }, { timestamp: "t1", message: `start password=${FAKE} ok` }, { timestamp: "t2", message: "plain line" }] } } };
+    else if (q.includes("containers")) data = { docker: { containers: [CONTAINER, CLOSED, STOPPED, QUIET] } };
     else if (q.includes("shares")) data = { shares: [{ name: "media", free: 1, used: 2, size: 3, cache: true, include: [], exclude: [] }] };
     else if (q.includes("parityHistory")) data = { parityHistory: [{ date: "d", duration: 1, speed: "s", status: "OK", errors: 0 }, { date: "e" }] };
     else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1" }] };
@@ -72,7 +96,7 @@ const api = http.createServer((req, res) => {
   };
 
   const names = (await client.listTools()).tools;
-  assert.strictEqual(names.length, 9);
+  assert.strictEqual(names.length, 10);
   assert(names.every((t) => t.annotations.readOnlyHint), "every tool is read-only");
 
   await call("server_status");
@@ -81,7 +105,7 @@ const api = http.createServer((req, res) => {
 
   const list = await call("list_containers", { state: "running" });
   assert.strictEqual(list.containers[0].name, "app");
-  assert.strictEqual((await call("list_containers", { state: "exited" })).containers.length, 0);
+  assert.deepStrictEqual((await call("list_containers", { state: "exited" })).containers.map((c) => c.name), ["stopped"]);
 
   const one = await call("get_container", { name: "app" });
   assert.deepStrictEqual(one.template.variables[0], { name: "API_KEY", masked: true });
@@ -90,7 +114,20 @@ const api = http.createServer((req, res) => {
   assert.strictEqual(one.mounts[0].host, "/mnt/x");
   assert.strictEqual(one.mounts[0].Propagation, undefined);
 
-  const deps = (await call("list_dependencies")).dependencies[0];
+  assert.strictEqual((await call("get_container", { name: "closed-app" })).template.file, "my-Closed-App.xml", "matched by <Name>, not file name");
+
+  const ports = await call("port_drift");
+  const byName = Object.fromEntries(ports.containers.map((c) => [c.name, c]));
+  assert.deepStrictEqual(ports.with_drift, ["app", "closed-app"]);
+  assert.deepStrictEqual(byName.app.drift, [{ port: "8080/TCP", expected: "not in template", live: "0.0.0.0" }]);
+  assert.deepStrictEqual(byName["closed-app"].drift, [{ port: "9001/TCP", expected: "172.17.0.1", live: "0.0.0.0" }]);
+  assert.deepStrictEqual(byName["closed-app"].lan_ports, ["9001/TCP", "9002/TCP"]);
+  assert.strictEqual(byName["closed-app"].unread_port_settings, 1);
+  assert.deepStrictEqual(byName.stopped.lan_ports, ["9100/TCP"], "a stopped container is judged by its template");
+  assert.deepStrictEqual(byName.stopped.drift, []);
+  assert.strictEqual(byName.quiet.has_template, false);
+
+  const deps = (await call("list_dependencies")).dependencies.find((c) => c.container === "app");
   assert.strictEqual(deps.container, "app");
   assert.deepStrictEqual(deps.targets.find((x) => x.variable === "DATABASE_URL"), { variable: "DATABASE_URL", host: "10.0.0.5", port: 8080, published_by: "app" });
   assert.deepStrictEqual(deps.targets.find((x) => x.variable === "OTHER_URL"), { variable: "OTHER_URL", host: "10.0.0.6", port: 81 });
@@ -99,8 +136,14 @@ const api = http.createServer((req, res) => {
   assert(!deps.targets.some((x) => x.variable === "DB_PASS" || x.variable === "API_KEY"));
 
   const logs = await call("container_logs", { name: "app", lines: 100000 });
-  assert(logs.lines[0].message.includes("[hidden]") && logs.lines[1].message === "plain line");
-  assert(queries.at(-1).includes("tail: 200"), "tail is capped");
+  assert(logs.lines[0].message.includes("[hidden]") && logs.lines[1].message === "plain line" && logs.lines[2].message === "newest", "oldest first");
+  assert(queries.at(-1).includes("tail: 600"), "asks for more than the capped 200");
+  assert.strictEqual(logs.requested, 200);
+  assert.strictEqual(logs.returned, 3);
+  assert(logs.note.includes("Fewer lines"));
+  const newest = await call("container_logs", { name: "app", lines: 1 });
+  assert.deepStrictEqual(newest.lines.map((l) => l.message), ["newest"], "keeps the newest");
+  assert((await call("container_logs", { name: "quiet" })).note.includes("returned no lines"), "an empty answer is called out");
 
   const missing = await client.callTool({ name: "container_logs", arguments: { name: "../etc" } });
   assert(missing.isError);
