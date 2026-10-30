@@ -6,7 +6,7 @@ const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/ser
 const { config, StepError } = require("./lib/config");
 const tools = require("./lib/tools");
 
-const INFO = { name: "unraid_diag", version: "0.1.0" };
+const INFO = { name: "unraid_diag", version: "0.2.0" };
 const MAX_BODY_BYTES = 1024 * 1024;
 
 // No MCP_TOKEN = everything refused.
@@ -70,6 +70,13 @@ function registerTools(server) {
     "The last lines of one container's log, with secret-looking values hidden. The filter can't catch everything: don't repeat log content beyond what the task needs.",
     { name: z.string().min(1), lines: z.number().int().min(1).optional().describe(`Default 50, at most ${config.maxLogLines}`) },
     (a) => tools.containerLogs(a),
+  );
+  add(
+    "list_dependencies",
+    "List dependencies",
+    "For each unRAID template: the hosts and ports its variables point at, and which container publishes that port. Only host, port and variable name leave the value, never credentials. Settings in an app's own files aren't visible.",
+    {},
+    () => tools.listDependencies(),
   );
   add("list_shares", "List shares", "User shares: size, free and used space, cache setting, included and excluded disks.", {}, () => tools.listShares());
   add(

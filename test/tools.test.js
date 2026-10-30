@@ -12,7 +12,13 @@ const queries = [];
 fs.writeFileSync(
   path.join(ROOT, "my-app.xml"),
   `<?xml version="1.0"?><Container><Privileged>true</Privileged><Network>bridge</Network><ExtraParams>--cap-add=NET_ADMIN -e HIDDEN=${FAKE}</ExtraParams>
-  <Config Name="Key" Target="API_KEY" Type="Variable" Mask="true">${FAKE}</Config><Config Name="Data" Target="/data" Type="Path">/mnt/x</Config></Container>`,
+  <Config Name="Key" Target="API_KEY" Type="Variable" Mask="true">${FAKE}</Config><Config Name="Data" Target="/data" Type="Path">/mnt/x</Config>
+  <Config Name="Db" Target="DATABASE_URL" Type="Variable">postgres://user:${FAKE}@10.0.0.5:8080/db?x=${FAKE}</Config>
+  <Config Name="Url" Target="OTHER_URL" Type="Variable">http://10.0.0.6:81/path</Config>
+  <Config Name="Host" Target="DB_HOST" Type="Variable">db.local</Config>
+  <Config Name="Port" Target="DB_PORT" Type="Variable">5432</Config>
+  <Config Name="Pass" Target="DB_PASS" Type="Variable">${FAKE}</Config>
+  </Container>`,
 );
 
 const CONTAINER = {
@@ -66,7 +72,7 @@ const api = http.createServer((req, res) => {
   };
 
   const names = (await client.listTools()).tools;
-  assert.strictEqual(names.length, 8);
+  assert.strictEqual(names.length, 9);
   assert(names.every((t) => t.annotations.readOnlyHint), "every tool is read-only");
 
   await call("server_status");
@@ -78,11 +84,19 @@ const api = http.createServer((req, res) => {
   assert.strictEqual((await call("list_containers", { state: "exited" })).containers.length, 0);
 
   const one = await call("get_container", { name: "app" });
-  assert.deepStrictEqual(one.template.variables, [{ name: "API_KEY", masked: true }]);
+  assert.deepStrictEqual(one.template.variables[0], { name: "API_KEY", masked: true });
   assert.deepStrictEqual(one.template.extra_param_flags, ["--cap-add", "-e"]);
   assert.strictEqual(one.template.privileged, true);
   assert.strictEqual(one.mounts[0].host, "/mnt/x");
   assert.strictEqual(one.mounts[0].Propagation, undefined);
+
+  const deps = (await call("list_dependencies")).dependencies[0];
+  assert.strictEqual(deps.container, "app");
+  assert.deepStrictEqual(deps.targets.find((x) => x.variable === "DATABASE_URL"), { variable: "DATABASE_URL", host: "10.0.0.5", port: 8080, published_by: "app" });
+  assert.deepStrictEqual(deps.targets.find((x) => x.variable === "OTHER_URL"), { variable: "OTHER_URL", host: "10.0.0.6", port: 81 });
+  assert.strictEqual(deps.targets.find((x) => x.variable === "DB_HOST").host, "db.local");
+  assert.strictEqual(deps.targets.find((x) => x.variable === "DB_PORT").port, 5432);
+  assert(!deps.targets.some((x) => x.variable === "DB_PASS" || x.variable === "API_KEY"));
 
   const logs = await call("container_logs", { name: "app", lines: 100000 });
   assert(logs.lines[0].message.includes("[hidden]") && logs.lines[1].message === "plain line");

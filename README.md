@@ -4,7 +4,7 @@ Read-only MCP server (Streamable HTTP, stateless, `POST /mcp`) for unRAID, using
 
 ## Tools
 
-`server_status`, `list_containers`, `get_container`, `container_logs`, `list_shares`, `list_disks`, `list_notifications`, `parity_history`.
+`server_status`, `list_containers`, `get_container`, `container_logs`, `list_dependencies`, `list_shares`, `list_disks`, `list_notifications`, `parity_history`.
 
 Every query names its fields, so environment values, serial numbers and machine IDs never reach an answer. `get_container` reads the container's unRAID template for variable names and flags only. Logs and notifications pass through a filter that hides secret-looking values; it can't catch everything. `list_disks` may wake sleeping drives, so everyday checks should use `server_status`.
 
