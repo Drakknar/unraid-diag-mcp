@@ -223,10 +223,26 @@ const api = http.createServer((req, res) => {
     ["MY_DB_PASSWORD=swordfish9", "swordfish9"],
     ["id 0123456789abcdef0123456789abcdef seen", "0123456789abcdef0123456789abcdef"],
     ["eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.sig", "eyJhbGciOiJIUzI1"],
+    ['{\"password\":\"fakevalue1\",\"user\":\"a\"}', "fakevalue1"],
+    ["tool --password fakevalue2 --verbose", "fakevalue2"],
+    ["tool --token fakevalue3", "fakevalue3"],
+    ["tool --api-key=fakevalue4", "fakevalue4"],
+    ["PGPASSWORD fakevalue5 psql", "fakevalue5"],
+    ["Authorization: Token fakevalue6", "fakevalue6"],
+    ["Authorization: Custom fakevalue7", "fakevalue7"],
+    ["Cookie: a=1; session=fakevalue8", "fakevalue8"],
+    ["password=two fakewords9", "fakewords9"],
+    ["postgres://user:fake/value10@db/x", "value10"],
+    ["found AKIAFAKEFAKEFAKEFAKE here", "AKIAFAKEFAKEFAKEFAKE"],
+    ["password\x1b[0m=fakevalue11", "fakevalue11"],
   ]) {
     assert(!redact(input).includes(leaked), input);
   }
   assert.strictEqual(redact("GET /health 200 in 3ms"), "GET /health 200 in 3ms");
+  assert.strictEqual(redact("user=alice logged in"), "user=alice logged in");
+  assert.strictEqual(redact("wrong password for alice"), "wrong password for alice");
+  assert.strictEqual(redact("http://host:8080/path"), "http://host:8080/path");
+  assert(redact('{"password":"x1","user":"alice"}').includes("alice"), "a JSON neighbour stays");
 
   await client.close();
   httpServer.close();
