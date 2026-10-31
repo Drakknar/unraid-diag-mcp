@@ -24,12 +24,26 @@ fs.writeFileSync(
 // A file name in another case than the container (as CA creates them), and -p bindings in Extra Parameters.
 fs.writeFileSync(
   path.join(ROOT, "my-Closed-App.xml"),
-  `<?xml version="1.0"?><Container><Name>closed-app</Name><Network>bridge</Network><ExtraParams>--restart=always -e HIDDEN=${FAKE} -p 172.17.0.1:9001:80 -p 7000-7001:7000-7001</ExtraParams>
+  `<?xml version="1.0"?><Container><Name>closed-app</Name><Network>bridge</Network><ExtraParams>--restart=always -e HIDDEN=${FAKE} -p 172.17.0.1:9001:80 -p 7000-7001:7000-7001 -p 7100-7102:80-81</ExtraParams>
   <Config Name="Sync" Target="55555" Type="Port" Mode="tcp">9002</Config></Container>`,
 );
 fs.writeFileSync(
   path.join(ROOT, "my-stopped.xml"),
   `<?xml version="1.0"?><Container><Name>stopped</Name><Network>bridge</Network><ExtraParams></ExtraParams><Config Name="Web" Target="80" Type="Port" Mode="tcp">9100</Config></Container>`,
+);
+
+// A custom bridge network publishes like the default one; a network tied to a host interface publishes nothing.
+fs.writeFileSync(
+  path.join(ROOT, "my-private.xml"),
+  `<?xml version="1.0"?><Container><Name>private</Name><Network>app-net</Network><ExtraParams>-p 172.17.0.1:7200-7201:7200-7201</ExtraParams><Config Name="Web" Target="80" Type="Port" Mode="tcp">9200</Config></Container>`,
+);
+fs.writeFileSync(
+  path.join(ROOT, "my-macvlan.xml"),
+  `<?xml version="1.0"?><Container><Name>macvlan</Name><Network>br0</Network><ExtraParams></ExtraParams><Config Name="Web" Target="80" Type="Port" Mode="tcp">9300</Config></Container>`,
+);
+fs.writeFileSync(
+  path.join(ROOT, "my-private-stopped.xml"),
+  `<?xml version="1.0"?><Container><Name>private-stopped</Name><Network>app-net</Network><ExtraParams></ExtraParams><Config Name="Web" Target="80" Type="Port" Mode="tcp">9400</Config></Container>`,
 );
 
 const CONTAINER = {
@@ -51,6 +65,17 @@ const CLOSED = {
 const STOPPED = { ...base, id: "c3", names: ["/stopped"], image: "i", state: "EXITED", status: "Exited", ports: [] };
 const QUIET = { ...base, id: "c4", names: ["/quiet"], image: "i", ports: [] };
 
+const PRIVATE = {
+  ...base, id: "c5", names: ["/private"], image: "i", hostConfig: { networkMode: "app-net" },
+  ports: [
+    { ip: "172.17.0.1", privatePort: 7200, publicPort: 7200, type: "TCP" },
+    { ip: "172.17.0.1", privatePort: 7201, publicPort: 7201, type: "TCP" },
+    { ip: "0.0.0.0", privatePort: 5432, publicPort: 5432, type: "TCP" }, // should be private, and it isn't
+  ],
+};
+const MACVLAN = { ...base, id: "c6", names: ["/macvlan"], image: "i", hostConfig: { networkMode: "br0" }, ports: [] };
+const PRIVATE_STOPPED = { ...base, id: "c7", names: ["/private-stopped"], image: "i", state: "EXITED", status: "Exited", hostConfig: { networkMode: "app-net" }, ports: [] };
+
 const api = http.createServer((req, res) => {
   let b = "";
   req.on("data", (c) => (b += c));
@@ -61,7 +86,7 @@ const api = http.createServer((req, res) => {
     let data = {};
     if (q.includes('"c4"')) data = { docker: { logs: { lines: [] } } };
     else if (q.includes("logs(")) data = { docker: { logs: { lines: [{ timestamp: "t3", message: "newest" }, { timestamp: "t1", message: `start password=${FAKE} ok` }, { timestamp: "t2", message: "plain line" }] } } };
-    else if (q.includes("containers")) data = { docker: { containers: [CONTAINER, CLOSED, STOPPED, QUIET] } };
+    else if (q.includes("containers")) data = { docker: { containers: [CONTAINER, CLOSED, STOPPED, QUIET, PRIVATE, MACVLAN, PRIVATE_STOPPED] } };
     else if (q.includes("shares")) data = { shares: [{ name: "media", free: 1, used: 2, size: 3, cache: true, include: [], exclude: [] }] };
     else if (q.includes("parityHistory")) data = { parityHistory: [{ date: "d", duration: 1, speed: "s", status: "OK", errors: 0 }, { date: "e" }] };
     else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1" }] };
@@ -105,7 +130,7 @@ const api = http.createServer((req, res) => {
 
   const list = await call("list_containers", { state: "running" });
   assert.strictEqual(list.containers[0].name, "app");
-  assert.deepStrictEqual((await call("list_containers", { state: "exited" })).containers.map((c) => c.name), ["stopped"]);
+  assert.deepStrictEqual((await call("list_containers", { state: "exited" })).containers.map((c) => c.name), ["stopped", "private-stopped"]);
 
   const one = await call("get_container", { name: "app" });
   assert.deepStrictEqual(one.template.variables[0], { name: "API_KEY", masked: true });
@@ -118,14 +143,21 @@ const api = http.createServer((req, res) => {
 
   const ports = await call("port_drift");
   const byName = Object.fromEntries(ports.containers.map((c) => [c.name, c]));
-  assert.deepStrictEqual(ports.with_drift, ["app", "closed-app"]);
+  assert.deepStrictEqual(ports.with_drift, ["app", "closed-app", "private"]);
   assert.deepStrictEqual(byName.app.drift, [{ port: "8080/TCP", expected: "not in template", live: "0.0.0.0" }]);
-  assert.deepStrictEqual(byName["closed-app"].drift, [{ port: "9001/TCP", expected: "172.17.0.1", live: "0.0.0.0" }]);
+  assert.deepStrictEqual(byName["closed-app"].drift.slice(0, 1), [{ port: "9001/TCP", expected: "172.17.0.1", live: "0.0.0.0" }]);
+  assert.deepStrictEqual(byName["closed-app"].drift.slice(1).map((d) => d.port), ["7000/TCP", "7001/TCP"], "a range is read as its ports");
   assert.deepStrictEqual(byName["closed-app"].lan_ports, ["9001/TCP", "9002/TCP"]);
   assert.strictEqual(byName["closed-app"].unread_port_settings, 1);
   assert.deepStrictEqual(byName.stopped.lan_ports, ["9100/TCP"], "a stopped container is judged by its template");
   assert.deepStrictEqual(byName.stopped.drift, []);
   assert.strictEqual(byName.quiet.has_template, false);
+  assert.deepStrictEqual(byName.private.drift, [
+    { port: "9200/TCP", expected: "0.0.0.0", live: "not published" },
+    { port: "5432/TCP", expected: "not in template", live: "0.0.0.0" },
+  ], "a custom network is compared too, and its range matches");
+  assert.deepStrictEqual(byName.macvlan.drift, [], "a host interface network publishes nothing");
+  assert.deepStrictEqual(byName["private-stopped"].lan_ports, ["9400/TCP"]);
 
   const deps = (await call("list_dependencies")).dependencies.find((c) => c.container === "app");
   assert.strictEqual(deps.container, "app");
