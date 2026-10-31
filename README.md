@@ -1,6 +1,6 @@
 # unraid-diag MCP
 
-Read-only MCP server (Streamable HTTP, stateless, `POST /mcp`) for unRAID, using the official GraphQL API. It has no write tools and doesn't need the Docker socket.
+Read-only MCP server (Streamable HTTP, stateless, `POST /mcp`) for unRAID, using the official GraphQL API. It has no write tools and never mounts the Docker socket.
 
 ## Tools
 
@@ -18,6 +18,7 @@ Image: `ghcr.io/drakknar/unraid-diag-mcp`, port 8080.
 | `UNRAID_URL` | required: the web UI's https address |
 | `UNRAID_API_KEY` | required: API key with read access to Docker, Array, Info, Disk, Share and Notifications, no roles |
 | `UNRAID_CERT_FILE` | unRAID's certificate as PEM (default `/data/unraid-cert.pem`). Only this exact certificate is accepted |
+| `DOCKER_HOST_URL` | optional: a Docker socket proxy allowing only `GET /containers/<name>/logs`. `container_logs` uses it first, since unRAID's API returns nothing for some containers, and falls back to the API. Never point it at a raw socket proxy |
 | `TEMPLATES_DIR` | optional: read-only mount of `/boot/config/plugins/dockerMan/templates-user` (default `/templates`) |
 
 ## Tests
