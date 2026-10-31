@@ -87,11 +87,16 @@ const api = http.createServer((req, res) => {
     if (q.includes('"c4"')) data = { docker: { logs: { lines: [] } } };
     else if (q.includes("logs(")) data = { docker: { logs: { lines: [{ timestamp: "t3", message: "newest" }, { timestamp: "t1", message: `start password=${FAKE} ok` }, { timestamp: "t2", message: "plain line" }] } } };
     else if (q.includes("containers")) data = { docker: { containers: [CONTAINER, CLOSED, STOPPED, QUIET, PRIVATE, MACVLAN, PRIVATE_STOPPED] } };
-    else if (q.includes("shares")) data = { shares: [{ name: "media", free: 1, used: 2, size: 3, cache: true, include: [], exclude: [] }] };
+    else if (q.includes("shares")) data = { shares: [{ name: "media", free: "1000000000", used: "2000000", size: null, cache: true, include: [], exclude: [] }] };
     else if (q.includes("parityHistory")) data = { parityHistory: [{ date: "d", duration: 1, speed: "s", status: "OK", errors: 0 }, { date: "e" }] };
-    else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1", size: 4000 }] };
+    else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1", size: 4000000000000 }] };
     else if (q.includes("list(filter")) data = { notifications: { list: [{ title: "t", subject: `token: ${FAKE}`, description: "d", importance: "INFO", timestamp: "x" }] } };
-    else data = { array: { state: "STARTED", disks: [{ name: "disk1", size: 30, fsFree: 10, fsUsed: 20 }], caches: [{ name: "cache", size: 3, fsFree: 1, fsUsed: 2 }] } };
+    else data = { array: {
+      state: "STARTED",
+      capacity: { kilobytes: { free: "42984860660", used: "16871938372", total: "59856799031" } },
+      disks: [{ name: "disk1", size: 19531825100, fsFree: 15508407169, fsUsed: 4351521608 }],
+      caches: [{ name: "cache", size: 976762552, fsFree: 312007733, fsUsed: 653581259 }, { name: "small", size: 500000, fsFree: 250000, fsUsed: 250000 }],
+    } };
     res.end(JSON.stringify({ data }));
   });
 });
@@ -127,10 +132,14 @@ const api = http.createServer((req, res) => {
 
   const status = await call("server_status");
   assert(!queries.at(-1).includes("disks { name device"), "server_status must not use the top-level disks query");
-  assert.deepStrictEqual(status.array.disks, [{ name: "disk1", sizeKb: 30, fsFreeKb: 10, fsUsedKb: 20 }]);
-  assert.deepStrictEqual(status.array.caches, [{ name: "cache", sizeKb: 3, fsFreeKb: 1, fsUsedKb: 2 }]);
-  assert.deepStrictEqual((await call("list_shares")).shares[0], { name: "media", cache: true, include: [], exclude: [], freeKb: 1, usedKb: 2, sizeKb: 3 });
-  assert.deepStrictEqual((await call("list_disks")).disks, [{ name: "d1", sizeBytes: 4000 }]);
+  assert.deepStrictEqual(status.array.capacity, { free: "44.02 TB", used: "17.28 TB", total: "61.29 TB", usedPercent: 28.2 });
+  assert.deepStrictEqual(status.array.disks, [{ name: "disk1", size: "20.00 TB", free: "15.88 TB", used: "4.46 TB", usedPercent: 21.9 }]);
+  assert.deepStrictEqual(status.array.caches, [
+    { name: "cache", size: "1.00 TB", free: "319.50 GB", used: "669.27 GB", usedPercent: 67.7 },
+    { name: "small", size: "512.00 MB", free: "256.00 MB", used: "256.00 MB", usedPercent: 50 },
+  ]);
+  assert.deepStrictEqual((await call("list_shares")).shares[0], { name: "media", cache: true, include: [], exclude: [], free: "1.02 TB", used: "2.05 GB", size: null });
+  assert.deepStrictEqual((await call("list_disks")).disks, [{ name: "d1", size: "4.00 TB" }]);
   assert(!queries.some((q) => /mutation/.test(q)));
 
   const list = await call("list_containers", { state: "running" });
