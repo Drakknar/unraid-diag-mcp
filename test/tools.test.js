@@ -89,9 +89,9 @@ const api = http.createServer((req, res) => {
     else if (q.includes("containers")) data = { docker: { containers: [CONTAINER, CLOSED, STOPPED, QUIET, PRIVATE, MACVLAN, PRIVATE_STOPPED] } };
     else if (q.includes("shares")) data = { shares: [{ name: "media", free: 1, used: 2, size: 3, cache: true, include: [], exclude: [] }] };
     else if (q.includes("parityHistory")) data = { parityHistory: [{ date: "d", duration: 1, speed: "s", status: "OK", errors: 0 }, { date: "e" }] };
-    else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1" }] };
+    else if (q.includes("disks {") && !q.includes("array")) data = { disks: [{ name: "d1", size: 4000 }] };
     else if (q.includes("list(filter")) data = { notifications: { list: [{ title: "t", subject: `token: ${FAKE}`, description: "d", importance: "INFO", timestamp: "x" }] } };
-    else data = { array: { state: "STARTED" } };
+    else data = { array: { state: "STARTED", disks: [{ name: "disk1", size: 30, fsFree: 10, fsUsed: 20 }], caches: [{ name: "cache", size: 3, fsFree: 1, fsUsed: 2 }] } };
     res.end(JSON.stringify({ data }));
   });
 });
@@ -125,8 +125,12 @@ const api = http.createServer((req, res) => {
   assert.strictEqual(names.length, 10);
   assert(names.every((t) => t.annotations.readOnlyHint), "every tool is read-only");
 
-  await call("server_status");
+  const status = await call("server_status");
   assert(!queries.at(-1).includes("disks { name device"), "server_status must not use the top-level disks query");
+  assert.deepStrictEqual(status.array.disks, [{ name: "disk1", sizeKb: 30, fsFreeKb: 10, fsUsedKb: 20 }]);
+  assert.deepStrictEqual(status.array.caches, [{ name: "cache", sizeKb: 3, fsFreeKb: 1, fsUsedKb: 2 }]);
+  assert.deepStrictEqual((await call("list_shares")).shares[0], { name: "media", cache: true, include: [], exclude: [], freeKb: 1, usedKb: 2, sizeKb: 3 });
+  assert.deepStrictEqual((await call("list_disks")).disks, [{ name: "d1", sizeBytes: 4000 }]);
   assert(!queries.some((q) => /mutation/.test(q)));
 
   const list = await call("list_containers", { state: "running" });
