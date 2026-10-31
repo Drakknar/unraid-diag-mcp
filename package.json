@@ -1,6 +1,6 @@
 {
   "name": "unraid-diag-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Read-only MCP server for unRAID: status, containers, logs, shares and disks through the official GraphQL API, with allow-listed fields",
   "main": "server.js",
