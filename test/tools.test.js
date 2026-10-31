@@ -105,6 +105,7 @@ const api = http.createServer((req, res) => {
   const { StreamableHTTPClientTransport } = require("@modelcontextprotocol/sdk/client/streamableHttp.js");
   const { httpServer } = require("../server");
   const { redact } = require("../lib/redact");
+  const { config } = require("../lib/config");
   await new Promise((r) => httpServer.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${httpServer.address().port}/mcp`;
 
@@ -176,6 +177,35 @@ const api = http.createServer((req, res) => {
   const newest = await call("container_logs", { name: "app", lines: 1 });
   assert.deepStrictEqual(newest.lines.map((l) => l.message), ["newest"], "keeps the newest");
   assert((await call("container_logs", { name: "quiet" })).note.includes("returned no lines"), "an empty answer is called out");
+
+  // A log-only Docker proxy comes first when set, and the API takes over when it fails.
+  const dockerSeen = [];
+  let dockerStatus = 200;
+  const frame = (text) => {
+    const head = Buffer.alloc(8);
+    head[0] = 1;
+    head.writeUInt32BE(Buffer.byteLength(text), 4);
+    return Buffer.concat([head, Buffer.from(text)]);
+  };
+  const dockerApi = http.createServer((req, res) => {
+    dockerSeen.push(`${req.method} ${req.url}`);
+    res.statusCode = dockerStatus;
+    res.end(dockerStatus === 200 ? Buffer.concat([frame("2026-01-01T00:00:00Z first\n"), frame(`2026-01-01T00:00:01Z password=${FAKE} second\n`)]) : "refused");
+  });
+  await new Promise((r) => dockerApi.listen(0, "127.0.0.1", r));
+  config.dockerHost = `http://127.0.0.1:${dockerApi.address().port}`;
+  const direct = await call("container_logs", { name: "quiet", lines: 5 });
+  assert.strictEqual(direct.source, "docker");
+  assert.deepStrictEqual(direct.lines[0], { time: "2026-01-01T00:00:00Z", message: "first" });
+  assert(direct.lines[1].message.includes("[hidden]"), "Docker lines are filtered too");
+  assert.strictEqual(dockerSeen.at(-1), "GET /containers/quiet/logs?stdout=1&stderr=1&timestamps=1&tail=5");
+  dockerStatus = 403;
+  const fallback = await call("container_logs", { name: "app", lines: 1 });
+  assert.strictEqual(fallback.source, "unraid_api");
+  assert(fallback.note.includes("Docker logs failed"));
+  assert(dockerSeen.every((r) => r.startsWith("GET /containers/")), "only log reads");
+  config.dockerHost = "";
+  dockerApi.close();
 
   const missing = await client.callTool({ name: "container_logs", arguments: { name: "../etc" } });
   assert(missing.isError);
