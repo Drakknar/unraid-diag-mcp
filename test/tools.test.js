@@ -256,6 +256,11 @@ const api = http.createServer((req, res) => {
   assert.strictEqual(redact("wrong password for alice"), "wrong password for alice");
   assert.strictEqual(redact("http://host:8080/path"), "http://host:8080/path");
   assert(redact('{"password":"x1","user":"alice"}').includes("alice"), "a JSON neighbour stays");
+  const started = Date.now();
+  redact("A".repeat(64000));
+  redact("x.y-".repeat(16000));
+  assert(Date.now() - started < 3000, "one long run of word characters stays fast");
+  assert.strictEqual(redact("API_TOKEN=abc123"), "API_TOKEN=[hidden]");
 
   await client.close();
   httpServer.close();
