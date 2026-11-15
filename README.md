@@ -1,5 +1,7 @@
 # unraid-diag MCP
 
+<img src="assets/icon.svg" alt="" width="96" align="right">
+
 Read-only MCP server (Streamable HTTP, stateless, `POST /mcp`) for unRAID, using the official GraphQL API. It has no write tools and never mounts the Docker socket.
 
 ## Tools
